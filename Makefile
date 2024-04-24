@@ -18,8 +18,6 @@
 ##### Global variables #####
 
 WITH_NVCGO   ?= yes
-WITH_LIBELF  ?= no
-WITH_TIRPC   ?= no
 WITH_SECCOMP ?= yes
 
 ##### Global definitions #####
@@ -29,7 +27,6 @@ export exec_prefix = $(prefix)
 export bindir      = $(exec_prefix)/bin
 export libdir      = $(exec_prefix)/lib
 export docdir      = $(prefix)/share/doc
-export libdbgdir   = $(prefix)/lib/debug$(libdir)
 export includedir  = $(prefix)/include
 export pkgconfdir  = $(libdir)/pkgconfig
 
@@ -155,17 +152,12 @@ ifeq ($(WITH_NVCGO), yes)
 LIB_CPPFLAGS       += -DWITH_NVCGO
 LIB_LDLIBS_SHARED  += -lpthread
 endif
-ifeq ($(WITH_LIBELF), yes)
+# Build with system libelf unconditionally
 LIB_CPPFLAGS       += -DWITH_LIBELF
 LIB_LDLIBS_SHARED  += -lelf
-else
-LIB_LDLIBS_STATIC  += -l:libelf.a
-endif
-ifeq ($(WITH_TIRPC), yes)
-LIB_CPPFLAGS       += -isystem $(DEPS_DIR)$(includedir)/tirpc -DWITH_TIRPC
-LIB_LDLIBS_STATIC  += -l:libtirpc.a
-LIB_LDLIBS_SHARED  += -lpthread
-endif
+# Build with system libtirpc unconditionally
+CPPFLAGS           += -I/usr/include/tirpc
+LIB_LDLIBS_SHARED  += -lpthread -ltirpc
 ifeq ($(WITH_SECCOMP), yes)
 LIB_CPPFLAGS       += -DWITH_SECCOMP $(shell pkg-config --cflags libseccomp)
 LIB_LDLIBS_SHARED  += $(shell pkg-config --libs libseccomp)
@@ -219,22 +211,14 @@ $(BIN_OBJS): %.o: %.c | shared
 -include $(DEPENDENCIES)
 
 $(LIB_SHARED): $(LIB_OBJS)
-	$(MKDIR) -p $(DEBUG_DIR)
 	$(CC) $(LIB_CFLAGS) $(LIB_CPPFLAGS) $(LIB_LDFLAGS) $(OUTPUT_OPTION) $^ $(LIB_SCRIPT) $(LIB_LDLIBS)
-	$(OBJCPY) --only-keep-debug $@ $(LIB_SONAME)
-	$(OBJCPY) --add-gnu-debuglink=$(LIB_SONAME) $@
-	$(MV) $(LIB_SONAME) $(DEBUG_DIR)
-	$(STRIP) --strip-unneeded -R .comment $@
 
 $(LIB_STATIC_OBJ): $(LIB_OBJS)
 	# FIXME Handle user-defined LDFLAGS and LDLIBS
 	$(LD) -d -r --exclude-libs ALL -L$(DEPS_DIR)$(libdir) $(OUTPUT_OPTION) $^ $(LIB_LDLIBS_STATIC)
-	$(OBJCPY) --localize-hidden $@
-	$(STRIP) --strip-unneeded -R .comment $@
 
 $(BIN_NAME): $(BIN_OBJS)
 	$(CC) $(BIN_CFLAGS) $(BIN_CPPFLAGS) $(BIN_LDFLAGS) $(OUTPUT_OPTION) $^ $(BIN_SCRIPT) $(BIN_LDLIBS)
-	$(STRIP) --strip-unneeded -R .comment $@
 
 ##### Public rules #####
 
@@ -259,15 +243,9 @@ deps: $(LIB_RPC_SRCS) $(BUILD_DEFS)
 ifeq ($(WITH_NVCGO), yes)
 	$(MAKE) -f $(MAKE_DIR)/nvcgo.mk DESTDIR=$(DEPS_DIR) MAJOR=$(MAJOR) VERSION=$(VERSION) LIB_NAME=$(LIBGO_NAME) install
 endif
-ifeq ($(WITH_LIBELF), no)
-	$(MAKE) -f $(MAKE_DIR)/elftoolchain.mk DESTDIR=$(DEPS_DIR) install
-endif
-ifeq ($(WITH_TIRPC), yes)
-	$(MAKE) -f $(MAKE_DIR)/libtirpc.mk DESTDIR=$(DEPS_DIR) install
-endif
 
 install: all
-	$(INSTALL) -d -m 755 $(addprefix $(DESTDIR),$(includedir) $(bindir) $(libdir) $(docdir) $(libdbgdir) $(pkgconfdir))
+	$(INSTALL) -d -m 755 $(addprefix $(DESTDIR),$(includedir) $(bindir) $(libdir) $(docdir) $(pkgconfdir))
 	# Install header files
 	$(INSTALL) -m 644 $(LIB_INCS) $(DESTDIR)$(includedir)
 	# Install library files
@@ -276,18 +254,18 @@ install: all
 	$(LN) -sf $(LIB_SONAME) $(DESTDIR)$(libdir)/$(LIB_SYMLINK)
 ifeq ($(WITH_NVCGO), yes)
 	$(INSTALL) -m 755 $(DEPS_DIR)$(libdir)/$(LIBGO_SHARED) $(DESTDIR)$(libdir)
+	# FIXME: for some reason ldconfig stopped creating this symlink after applying Arch Linux LDFLAGS
+	$(LN) -sf $(LIBGO_SHARED) $(DESTDIR)$(libdir)/$(LIBGO_SONAME)
 	$(LN) -sf $(LIBGO_SONAME) $(DESTDIR)$(libdir)/$(LIBGO_SYMLINK)
 endif
 	$(LDCONFIG) -n $(DESTDIR)$(libdir)
-	# Install debugging symbols
-	$(INSTALL) -m 644 $(DEBUG_DIR)/$(LIB_SONAME) $(DESTDIR)$(libdbgdir)
 	# Install configuration files
 	$(MAKE_DIR)/$(LIB_PKGCFG).in "$(strip $(VERSION))" "$(strip $(LIB_LDLIBS_SHARED))" > $(DESTDIR)$(pkgconfdir)/$(LIB_PKGCFG)
 	# Install binary files
 	$(INSTALL) -m 755 $(BIN_NAME) $(DESTDIR)$(bindir)
 	# Install documentation files
-	$(INSTALL) -d -m 755 $(DESTDIR)$(docdir)/$(LIB_NAME)-$(VERSION)
-	$(INSTALL) -m 644 $(DOC_FILES) $(DESTDIR)$(docdir)/$(LIB_NAME)-$(VERSION)
+	$(INSTALL) -d -m 755 $(DESTDIR)$(docdir)/$(LIB_NAME)
+	$(INSTALL) -m 644 $(DOC_FILES) $(DESTDIR)$(docdir)/$(LIB_NAME)
 
 uninstall:
 	# Uninstall header files
@@ -297,14 +275,12 @@ uninstall:
 ifeq ($(WITH_NVCGO), yes)
 	$(RM) $(addprefix $(DESTDIR)$(libdir)/,$(LIBGO_SHARED) $(LIBGO_SONAME) $(LIBGO_SYMLINK))
 endif
-	# Uninstall debugging symbols
-	$(RM) $(DESTDIR)$(libdbgdir)/$(LIB_SONAME)
 	# Uninstall configuration files
 	$(RM) $(DESTDIR)$(pkgconfdir)/$(LIB_PKGCFG)
 	# Uninstall binary files
 	$(RM) $(DESTDIR)$(bindir)/$(BIN_NAME)
 	# Uninstall documentation files
-	$(RM) -r $(DESTDIR)$(docdir)/$(LIB_NAME)-$(VERSION)
+	$(RM) -r $(DESTDIR)$(docdir)/$(LIB_NAME)
 
 dist: DESTDIR:=$(DIST_DIR)/$(LIB_NAME)_$(VERSION)$(addprefix -,$(TAG))
 dist: install
@@ -316,12 +292,6 @@ depsclean:
 	-$(MAKE) -f $(MAKE_DIR)/nvidia-modprobe.mk clean
 ifeq ($(WITH_NVCGO), yes)
 	-$(MAKE) -f $(MAKE_DIR)/nvcgo.mk clean
-endif
-ifeq ($(WITH_LIBELF), no)
-	-$(MAKE) -f $(MAKE_DIR)/elftoolchain.mk clean
-endif
-ifeq ($(WITH_TIRPC), yes)
-	-$(MAKE) -f $(MAKE_DIR)/libtirpc.mk clean
 endif
 
 mostlyclean:
