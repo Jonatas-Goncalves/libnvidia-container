@@ -255,10 +255,8 @@ install: all
 ifeq ($(WITH_NVCGO), yes)
 	$(INSTALL) -m 755 $(DEPS_DIR)$(libdir)/$(LIBGO_SHARED) $(DESTDIR)$(libdir)
 	# FIXME: for some reason ldconfig stopped creating this symlink after applying Arch Linux LDFLAGS
-	if [ -f $(DESTDIR)$(libdir)/$(LIBGO_SHARED) ]; then \
-            $(LN) -sf $(LIBGO_SHARED) $(DESTDIR)$(libdir)/$(LIBGO_SONAME); \
-            $(LN) -sf $(LIBGO_SONAME) $(DESTDIR)$(libdir)/$(LIBGO_SYMLINK); \
-        fi
+	$(LN) -sf $(LIBGO_SHARED) $(DESTDIR)$(libdir)/$(LIBGO_SONAME)
+	$(LN) -sf $(LIBGO_SONAME) $(DESTDIR)$(libdir)/$(LIBGO_SYMLINK)
 endif
 	$(LDCONFIG) -n $(DESTDIR)$(libdir)
 	# Install configuration files
