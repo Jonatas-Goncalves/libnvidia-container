@@ -251,6 +251,7 @@ install: all
 	# Install library files
 	$(INSTALL) -m 644 $(LIB_STATIC) $(DESTDIR)$(libdir)
 	$(INSTALL) -m 755 $(LIB_SHARED) $(DESTDIR)$(libdir)
+	$(LN) -sf $(LIB_SHARED) $(DESTDIR)$(libdir)/$(LIB_SONAME)
 	$(LN) -sf $(LIB_SONAME) $(DESTDIR)$(libdir)/$(LIB_SYMLINK)
 ifeq ($(WITH_NVCGO), yes)
 	$(INSTALL) -m 755 $(DEPS_DIR)$(libdir)/$(LIBGO_SHARED) $(DESTDIR)$(libdir)
